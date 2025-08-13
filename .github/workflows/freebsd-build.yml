@@ -10,28 +10,96 @@ jobs:
   build-freebsd:
     runs-on: ubuntu-latest  # 使用Ubuntu作为宿主，通过QEMU模拟FreeBSD
     steps:
-      - name: Checkout code
+      - name: 显示工作流信息
+        run: |
+          echo "当前触发事件: ${{ github.event_name }}"
+          echo "当前标签: ${{ github.ref_name }}"
+          echo "当前SHA: ${{ github.sha }}"
+
+      - name: 检查标签是否存在
+        run: |
+          # 尝试列出所有标签并检查目标标签
+          git ls-remote --tags origin | grep -q "v0.10.0"
+          if [ $? -eq 0 ]; then
+            echo "标签v0.10.0存在"
+          else
+            echo "错误: 标签v0.10.0不存在于远程仓库"
+            exit 1
+          fi
+
+      - name: 检出代码
         uses: actions/checkout@v4
         with:
           ref: v0.10.0  # 检出v0.10.0版本代码
+          fetch-depth: 0  # 拉取完整历史，避免深度限制问题
+          persist-credentials: true
+          lfs: true  # 如果使用了Git LFS，启用此选项
 
-      - name: Set up FreeBSD environment
-        uses: vmactions/freebsd-vm@v1  # 使用FreeBSD虚拟机
+      - name: 显示检出信息
+        run: |
+          echo "当前分支: $(git rev-parse --abbrev-ref HEAD)"
+          echo "当前提交: $(git rev-parse HEAD)"
+          echo "工作目录内容:"
+          ls -la
+
+      - name: 设置FreeBSD环境并构建
+        uses: vmactions/freebsd-vm@v1
         with:
           release: '14.0'  # FreeBSD版本
           usesh: true
+          sync: rsync  # 使用rsync同步文件，更可靠
           prepare: |
+            # 更新包管理器
+            pkg update -f
             # 安装依赖
-            pkg install -y go gcc node npm git tar
+            pkg install -y go gcc node npm git tar bash
+            # 显示已安装的版本
+            go version
+            gcc --version
+            node --version
+            npm --version
           run: |
-            # 构建后端和前端
-            ./build.sh backend --no-lint --no-test  # 跳过lint和测试（可选）
+            # 显示工作目录
+            pwd
+            # 列出同步过来的文件
+            ls -la
+            # 确保构建脚本有执行权限
+            chmod +x ./build.sh
+            # 显示构建脚本内容（如果脚本不敏感）
+            # cat ./build.sh
+            # 构建后端
+            echo "开始构建后端..."
+            ./build.sh backend --no-lint --no-test
+            if [ $? -ne 0 ]; then
+              echo "错误: 后端构建失败"
+              exit 1
+            fi
+            # 构建前端
+            echo "开始构建前端..."
             ./build.sh frontend --no-lint --no-test
+            if [ $? -ne 0 ]; then
+              echo "错误: 前端构建失败"
+              exit 1
+            fi
             # 打包文件
+            echo "开始打包文件..."
             ./build.sh package -o ezbookkeeping-freebsd.tar.gz
+            if [ $? -ne 0 ]; then
+              echo "错误: 打包失败"
+              exit 1
+            fi
+            # 检查打包结果
+            echo "构建结果:"
+            ls -lh ezbookkeeping-freebsd.tar.gz
 
-      - name: Upload artifact
+      - name: 上传构建产物
         uses: actions/upload-artifact@v4
         with:
           name: ezbookkeeping-freebsd
           path: ezbookkeeping-freebsd.tar.gz
+          retention-days: 30  # 保留30天
+
+      - name: 构建失败通知
+        if: failure()
+        run: |
+          echo "构建失败，请检查日志了解详情"
