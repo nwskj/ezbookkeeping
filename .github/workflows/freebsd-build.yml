@@ -1,0 +1,37 @@
+name: Build FreeBSD Binary
+
+on:
+  push:
+    tags:
+      - 'v0.10.0'  # 针对v0.10.0版本构建
+  workflow_dispatch:  # 允许手动触发
+
+jobs:
+  build-freebsd:
+    runs-on: ubuntu-latest  # 使用Ubuntu作为宿主，通过QEMU模拟FreeBSD
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: v0.10.0  # 检出v0.10.0版本代码
+
+      - name: Set up FreeBSD environment
+        uses: vmactions/freebsd-vm@v1  # 使用FreeBSD虚拟机
+        with:
+          release: '14.0'  # FreeBSD版本
+          usesh: true
+          prepare: |
+            # 安装依赖
+            pkg install -y go gcc node npm git tar
+          run: |
+            # 构建后端和前端
+            ./build.sh backend --no-lint --no-test  # 跳过lint和测试（可选）
+            ./build.sh frontend --no-lint --no-test
+            # 打包文件
+            ./build.sh package -o ezbookkeeping-freebsd.tar.gz
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ezbookkeeping-freebsd
+          path: ezbookkeeping-freebsd.tar.gz
